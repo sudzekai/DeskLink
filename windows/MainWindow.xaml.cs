@@ -16,6 +16,7 @@ namespace DeskLink.Windows
         private readonly ObservableCollection<UserCommand> _commands;
         private readonly ObservableCollection<TrustedDevice> _trusted;
         private readonly System.Windows.Forms.NotifyIcon _tray;
+        private readonly System.Windows.Threading.DispatcherTimer _devicesTimer;
         private readonly Dictionary<string, int> _icons;
         private bool _exit;
 
@@ -47,6 +48,9 @@ namespace DeskLink.Windows
             _tray.ContextMenuStrip.Items.Add("Открыть", null, (_, _) => Dispatcher.Invoke(ShowWindow));
             _tray.ContextMenuStrip.Items.Add("Выход", null, (_, _) => Dispatcher.Invoke(Exit));
             _tray.DoubleClick += (_, _) => Dispatcher.Invoke(ShowWindow);
+            _devicesTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+            _devicesTimer.Tick += (_, _) => RefreshDevices();
+            _devicesTimer.Start();
             try { _server.Start(); }
             catch (Exception exception) { Log(exception.Message); }
         }
@@ -59,6 +63,13 @@ namespace DeskLink.Windows
             var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DeskLink", "errors.log");
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.AppendAllText(path, line + Environment.NewLine);
+        }
+
+        private void RefreshDevices()
+        {
+            ActiveDevicesList.Items.Clear();
+            foreach (var device in _server.GetConnectedDevices())
+                ActiveDevicesList.Items.Add(device);
         }
 
         private void Selected(object sender, SelectionChangedEventArgs e)
@@ -162,10 +173,32 @@ namespace DeskLink.Windows
                 using var process = Process.Start(new ProcessStartInfo("cmd.exe", "/d /s /c \"" + command.Command + "\"") { UseShellExecute = false, CreateNoWindow = true });
                 if (process is null) throw new InvalidOperationException("Запуск не удался");
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                await process.WaitForExitAsync(timeout.Token);
-                ResultText.Text = $"Код завершения: {process.ExitCode}";
+                try
+                {
+                    await process.WaitForExitAsync(timeout.Token);
+                    ResultText.Text = $"Код завершения: {process.ExitCode}";
+                }
+                catch (OperationCanceledException)
+                {
+                    if (!process.HasExited)
+                        process.Kill(true);
+
+                    ResultText.Text = "Превышено время выполнения (30 с)";
+                }
             }
             catch (Exception exception) { ResultText.Text = exception.Message; }
+        }
+
+        private void BrowseCommand(object sender, RoutedEventArgs e)
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Filter = "Командные файлы (*.bat;*.cmd)|*.bat;*.cmd",
+                CheckFileExists = true
+            };
+
+            if (dialog.ShowDialog() == true)
+                CommandBox.Text = "\"" + dialog.FileName + "\"";
         }
 
         private void SaveFolder(object sender, RoutedEventArgs e)
@@ -202,6 +235,7 @@ namespace DeskLink.Windows
         {
             if (!_exit) { e.Cancel = true; Hide(); return; }
             _tray.Visible = false;
+            _devicesTimer.Stop();
             _tray.Dispose();
             _server.DisposeAsync().AsTask().GetAwaiter().GetResult();
             _hardware.Dispose();

@@ -53,6 +53,7 @@ class MainActivity : ComponentActivity() {
     private val preferences by lazy { getSharedPreferences("desklink", MODE_PRIVATE) }
     private var lastTouch by mutableLongStateOf(System.currentTimeMillis())
     private var status by mutableStateOf("Не подключено")
+    private var lastConnectedAt by mutableLongStateOf(0L)
     private var metrics by mutableStateOf(JSONObject())
     private var media by mutableStateOf(JSONObject())
     private var commands by mutableStateOf(listOf<RemoteCommand>())
@@ -128,6 +129,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        setTurnScreenOn(true)
         host = preferences.getString("host", "127.0.0.1") ?: "127.0.0.1"
         key = preferences.getString("key", "") ?: ""
         deviceId = preferences.getString("deviceId", "primary") ?: "primary"
@@ -172,6 +174,7 @@ class MainActivity : ComponentActivity() {
             if (!response.optBoolean("ok")) error(response.optString("error"))
             metrics = response.getJSONObject("data")
             status = "Подключено"
+            lastConnectedAt = System.currentTimeMillis()
             if (!ambient) {
                 val mediaResponse = client().request("media")
                 if (mediaResponse.optBoolean("ok")) media = mediaResponse.getJSONObject("data")
@@ -185,7 +188,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
         } catch (exception: Exception) {
-            status = exception.message ?: "Нет соединения"
+            status = if (lastConnectedAt == 0L) "Поиск компьютера" else if (System.currentTimeMillis() - lastConnectedAt < 60_000) "Переподключение" else "ПК недоступен"
         }
     }
 
@@ -281,6 +284,7 @@ class MainActivity : ComponentActivity() {
         val shown = when {
             value == null -> "Н/Д"
             metric.unit == "MB/s" -> "%.1f MB/s".format(value / 1_000_000.0)
+            metric.key == "ramUsed" && !data.isNull("ramTotal") -> "%.1f/%.1f GB".format(value, data.optDouble("ramTotal"))
             metric.unit == "GB" -> "%.1f GB".format(value)
             else -> "${value.toInt()}${metric.unit}"
         }

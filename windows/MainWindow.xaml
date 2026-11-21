@@ -1,4 +1,4 @@
-﻿<Window x:Class="DeskLink.Windows.MainWindow"
+<Window x:Class="DeskLink.Windows.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -10,8 +10,33 @@
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
         <TextBlock x:Name="StatusText" Text="Запуск DeskLink..." Margin="12" FontSize="17"/>
         <TabControl Grid.Row="1" Margin="12">
-            <TabItem Header="Команды"><Grid Margin="10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="2*"/></Grid.ColumnDefinitions><StackPanel><ListBox x:Name="CommandsList" Height="340" DisplayMemberPath="Name" SelectionChanged="Selected"/><WrapPanel><Button Content="Новая" Click="New"/><Button Content="Удалить" Click="Delete"/><Button Content="↑" Click="Up"/><Button Content="↓" Click="Down"/></WrapPanel></StackPanel><StackPanel Grid.Column="1" Margin="12,0,0,0"><TextBlock Text="Название"/><TextBox x:Name="NameBox"/><TextBlock Text="Команда"/><TextBox x:Name="CommandBox" Height="85" AcceptsReturn="True"/><TextBlock Text="Иконка Bootstrap"/><ComboBox x:Name="IconBox" IsEditable="True" IsTextSearchEnabled="True" SelectionChanged="IconSelected"/><TextBlock x:Name="IconPreview" FontSize="36" Height="45"/><WrapPanel><Button Content="Сохранить" Click="Save"/><Button Content="Проверить" Click="Test"/></WrapPanel><TextBlock x:Name="ResultText" TextWrapping="Wrap"/></StackPanel></Grid></TabItem>
-            <TabItem Header="Подключение"><StackPanel Margin="12"><TextBlock Text="Доверенные устройства"/><ListBox x:Name="TrustedList" Height="100" DisplayMemberPath="Name" SelectionChanged="TrustedSelected"/><WrapPanel><Button Content="Добавить устройство" Click="AddDevice"/><Button Content="Отозвать доступ" Click="RemoveDevice"/></WrapPanel><TextBlock Text="ID устройства"/><TextBox x:Name="DeviceIdBox" IsReadOnly="True"/><TextBlock Text="Ключ подключения"/><TextBox x:Name="KeyBox" IsReadOnly="True"/><TextBlock Text="TCP 47652; USB: adb reverse tcp:47652 tcp:47652"/><TextBlock Text="Папка файлов"/><TextBox x:Name="FolderBox"/><WrapPanel><Button Content="Выбрать папку" Click="BrowseFolder"/><Button Content="Сохранить папку" Click="SaveFolder"/></WrapPanel><CheckBox x:Name="AutoStartBox" Content="Автозапуск" Click="AutoStart"/></StackPanel></TabItem>
+            <TabItem Header="Команды"><Grid Margin="10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="2*"/></Grid.ColumnDefinitions><StackPanel><ListBox x:Name="CommandsList" Height="340" DisplayMemberPath="Name" SelectionChanged="Selected"/><WrapPanel><Button Content="Новая" Click="New"/><Button Content="Удалить" Click="Delete"/><Button Content="↑" Click="Up"/><Button Content="↓" Click="Down"/></WrapPanel></StackPanel><StackPanel Grid.Column="1" Margin="12,0,0,0"><TextBlock Text="Название"/><TextBox x:Name="NameBox"/><TextBlock Text="Команда"/><TextBox x:Name="CommandBox" Height="85" AcceptsReturn="True"/><Button Content="Выбрать .bat/.cmd" Click="BrowseCommand"/><TextBlock Text="Иконка Bootstrap"/><ComboBox x:Name="IconBox" IsEditable="True" IsTextSearchEnabled="True" SelectionChanged="IconSelected"/><TextBlock x:Name="IconPreview" FontSize="36" Height="45"/><WrapPanel><Button Content="Сохранить" Click="Save"/><Button Content="Проверить" Click="Test"/></WrapPanel><TextBlock x:Name="ResultText" TextWrapping="Wrap"/></StackPanel></Grid></TabItem>
+            <TabItem Header="Подключение">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="12">
+                        <TextBlock Text="Активные устройства"/>
+                        <ListBox x:Name="ActiveDevicesList" Height="75"/>
+                        <TextBlock Text="Доверенные устройства"/>
+                        <ListBox x:Name="TrustedList" Height="100" DisplayMemberPath="Name" SelectionChanged="TrustedSelected"/>
+                        <WrapPanel>
+                            <Button Content="Добавить устройство" Click="AddDevice"/>
+                            <Button Content="Отозвать доступ" Click="RemoveDevice"/>
+                        </WrapPanel>
+                        <TextBlock Text="ID устройства"/>
+                        <TextBox x:Name="DeviceIdBox" IsReadOnly="True"/>
+                        <TextBlock Text="Ключ подключения"/>
+                        <TextBox x:Name="KeyBox" IsReadOnly="True"/>
+                        <TextBlock Text="TCP 47652; USB: adb reverse tcp:47652 tcp:47652"/>
+                        <TextBlock Text="Папка файлов"/>
+                        <TextBox x:Name="FolderBox"/>
+                        <WrapPanel>
+                            <Button Content="Выбрать папку" Click="BrowseFolder"/>
+                            <Button Content="Сохранить папку" Click="SaveFolder"/>
+                        </WrapPanel>
+                        <CheckBox x:Name="AutoStartBox" Content="Автозапуск" Click="AutoStart"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
             <TabItem Header="Журнал"><ListBox x:Name="LogList"/></TabItem>
         </TabControl>
     </Grid>

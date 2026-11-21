@@ -18,10 +18,20 @@ namespace DeskLink.Windows
         private readonly ConcurrentDictionary<string, DateTimeOffset> _nonces = new();
         private readonly ConcurrentDictionary<Guid, byte> _runningCommands = new();
         private readonly ConcurrentDictionary<Guid, UploadState> _uploads = new();
+        private readonly ConcurrentDictionary<string, (string Endpoint, DateTimeOffset Seen)> _devices = new();
         private readonly CancellationTokenSource _stop = new();
 
         public event Action<string>? StatusChanged;
         public event Action<string>? Error;
+
+        public IReadOnlyList<string> GetConnectedDevices()
+        {
+            var recent = DateTimeOffset.UtcNow - TimeSpan.FromSeconds(15);
+            return _devices
+                .Where(entry => entry.Value.Seen >= recent)
+                .Select(entry => $"{entry.Key} · {entry.Value.Endpoint}")
+                .ToList();
+        }
 
         public void Start()
         {
@@ -109,6 +119,7 @@ namespace DeskLink.Windows
                         }
 
                         StatusChanged?.Invoke($"Подключено · {endpoint}");
+                        _devices[deviceId] = (endpoint, DateTimeOffset.UtcNow);
                         object response;
                         try
                         {
@@ -327,9 +338,12 @@ namespace DeskLink.Windows
             try
             {
                 process.Start();
+                var outputTask = DrainAsync(process.StandardOutput, 0);
+                var errorTask = DrainAsync(process.StandardError, 1000);
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                 await process.WaitForExitAsync(timeout.Token);
-                var error = await process.StandardError.ReadToEndAsync();
+                await outputTask;
+                var error = await errorTask;
                 if (process.ExitCode != 0)
                     Error?.Invoke($"{command.Name}: {error}");
 
@@ -337,10 +351,28 @@ namespace DeskLink.Windows
             }
             catch (OperationCanceledException)
             {
-                process.Kill(true);
+                if (!process.HasExited)
+                    process.Kill(true);
+                await process.WaitForExitAsync();
                 Error?.Invoke($"{command.Name}: превышено время выполнения");
                 return new { ok = false, error = "Command timed out" };
             }
+        }
+
+        private static async Task<string> DrainAsync(StreamReader reader, int maximumLength)
+        {
+            var captured = new StringBuilder();
+            var buffer = new char[1024];
+            int length;
+
+            while ((length = await reader.ReadAsync(buffer)) > 0)
+            {
+                var remaining = maximumLength - captured.Length;
+                if (remaining > 0)
+                    captured.Append(buffer, 0, Math.Min(length, remaining));
+            }
+
+            return captured.ToString();
         }
 
         public ValueTask DisposeAsync()
