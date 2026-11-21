@@ -1,0 +1,7 @@
+**/bin/
+**/obj/
+**/build/
+.gradle/
+*.user
+local.properties
+*.apk
