@@ -89,7 +89,6 @@ namespace DeskLink.Windows
 
         private async Task HandleStreamsAsync(Stream input, Stream output, string endpoint)
         {
-            using (var reader = new StreamReader(input, Encoding.UTF8, false, 8192, true))
             using (var writer = new StreamWriter(output, new UTF8Encoding(false), 8192, true) { AutoFlush = true })
             {
 
@@ -97,11 +96,8 @@ namespace DeskLink.Windows
                 {
                     while (!_stop.IsCancellationRequested)
                     {
-                        var line = await reader.ReadLineAsync(_stop.Token);
+                        var line = await ReadRequestAsync(input, _stop.Token);
                         if (line is null)
-                            break;
-
-                        if (line.Length > 8 * 1024 * 1024)
                             break;
 
                         using var request = JsonDocument.Parse(line);
@@ -132,6 +128,7 @@ namespace DeskLink.Windows
                             response = new { ok = false, error = exception.Message };
                         }
                         await writer.WriteLineAsync(JsonSerializer.Serialize(Encrypt(deviceKey, JsonSerializer.Serialize(response), nonce)));
+                        break;
                     }
                 }
                 catch (Exception exception) when (exception is IOException or JsonException or SocketException or OperationCanceledException or KeyNotFoundException)
@@ -143,6 +140,31 @@ namespace DeskLink.Windows
                     StatusChanged?.Invoke("Ожидание подключения · TCP 47652");
                 }
             }
+        }
+
+        private static async Task<string?> ReadRequestAsync(Stream input, CancellationToken cancellationToken)
+        {
+            const int maximumBytes = 8 * 1024 * 1024;
+            using var data = new MemoryStream();
+            var chunk = new byte[8192];
+
+            while (data.Length <= maximumBytes)
+            {
+                var length = await input.ReadAsync(chunk, cancellationToken);
+                if (length == 0)
+                    return data.Length == 0 ? null : throw new InvalidDataException("Incomplete request");
+
+                var newline = Array.IndexOf(chunk, (byte)'\n', 0, length);
+                var count = newline < 0 ? length : newline;
+                if (data.Length + count > maximumBytes)
+                    throw new InvalidDataException("Request too large");
+
+                data.Write(chunk, 0, count);
+                if (newline >= 0)
+                    return Encoding.UTF8.GetString(data.ToArray()).TrimEnd('\r');
+            }
+
+            throw new InvalidDataException("Request too large");
         }
 
         private bool Authenticate(string deviceId, string nonce, string action, string payload, string signature, out byte[] key)

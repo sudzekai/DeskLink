@@ -14,6 +14,8 @@ import java.net.Socket
 import java.io.Closeable
 import java.io.InputStream
 import java.io.OutputStream
+import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.security.SecureRandom
 import javax.crypto.Mac
 import javax.crypto.Cipher
@@ -46,7 +48,7 @@ class AgentClient(private val context: Context, private val host: String, privat
                 writer.write(envelope.toString())
                 writer.newLine()
                 writer.flush()
-                val response = JSONObject(transport.input.bufferedReader(Charsets.UTF_8).readLine() ?: error("Agent disconnected"))
+                val response = JSONObject(readLineLimited(transport.input))
                 val responseNonce = response.getString("nonce").chunked(2).map { it.toInt(16).toByte() }.toByteArray()
                 val decryptor = Cipher.getInstance("AES/GCM/NoPadding")
                 decryptor.init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, responseNonce))
@@ -89,6 +91,24 @@ class AgentClient(private val context: Context, private val host: String, privat
             socket.close()
             throw exception
         }
+    }
+
+    private fun readLineLimited(input: InputStream): String {
+        val bytes = ByteArrayOutputStream()
+        val chunk = ByteArray(8192)
+        while (bytes.size() <= 8 * 1024 * 1024) {
+            val length = input.read(chunk)
+            if (length < 0) throw IOException("Agent disconnected")
+            var newline = -1
+            for (index in 0 until length) {
+                if (chunk[index] == 10.toByte()) { newline = index; break }
+            }
+            val count = if (newline < 0) length else newline
+            if (bytes.size() + count > 8 * 1024 * 1024) throw IOException("Response too large")
+            bytes.write(chunk, 0, count)
+            if (newline >= 0) return bytes.toString(Charsets.UTF_8.name()).trimEnd('\r')
+        }
+        throw IOException("Response too large")
     }
 
     private fun discoverHost(): String? = try {

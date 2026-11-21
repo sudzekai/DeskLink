@@ -14,6 +14,11 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.background
@@ -141,6 +146,7 @@ class MainActivity : ComponentActivity() {
         preferredHz = preferences.getFloat("preferredHz", 10f)
         pixelShift = preferences.getBoolean("pixelShift", true)
         keepScreen = preferences.getBoolean("keepScreen", true)
+        clipboardText = (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).primaryClip?.getItemAt(0)?.coerceToText(this)?.toString() ?: ""
         iconCodes = JSONObject(assets.open("bootstrap-icons.json").bufferedReader().use { it.readText() })
         cpuWarning = preferences.getInt("cpuWarning", 70)
         cpuCritical = preferences.getInt("cpuCritical", 85)
@@ -225,13 +231,19 @@ class MainActivity : ComponentActivity() {
             onDispose { }
         }
         MaterialTheme(colorScheme = darkColorScheme(background = Color(0xFF0F1116), surface = Color(0xFF202630), primary = Color(0xFF82B8FF))) {
+            CompositionLocalProvider(LocalContentColor provides Color.White) {
             if (ambient) {
                 Box(Modifier.fillMaxSize().background(Color.Black).safeDrawingPadding().clickable { ambient = false }, contentAlignment = Alignment.Center) {
                     Box(Modifier.offset(x = (shift * 2).dp, y = (shift * 2).dp)) { Monitoring(metrics, true) }
                 }
             } else {
                 Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).safeDrawingPadding()) {
-                    Text(pages[pager.currentPage], Modifier.padding(start = 16.dp, top = 6.dp), color = Color.LightGray, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium)
+                    AnimatedContent(targetState = pager.currentPage, transitionSpec = {
+                        val direction = if (targetState > initialState) 1 else -1
+                        slideInHorizontally(tween(220)) { it * direction } togetherWith slideOutHorizontally(tween(220)) { -it * direction }
+                    }, label = "sectionTitle") { page ->
+                        Text(pages[page], Modifier.padding(start = 16.dp, top = 6.dp), color = Color.LightGray, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium)
+                    }
                     HorizontalPager(state = pager, modifier = Modifier.weight(1f)) { page ->
                         when (page) {
                             0 -> Monitoring(metrics, false)
@@ -249,17 +261,19 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            }
         }
     }
 
     @Composable
     private fun Monitoring(data: JSONObject, compact: Boolean) {
-        val groups = listOf(
+        val allGroups = listOf(
             listOf(Metric("CPU", "cpuLoad", "%", 100.0), Metric("CPU", "cpuTemperature", "°C", 100.0), Metric("CPU", "cpuClock", "MHz", 5000.0)),
             listOf(Metric("GPU", "gpuLoad", "%", 100.0), Metric("GPU", "gpuTemperature", "°C", 100.0), Metric("VRAM", "gpuMemory", "MB", 16000.0)),
             listOf(Metric("RAM", "ramLoad", "%", 100.0), Metric("RAM", "ramUsed", "GB", data.optDouble("ramTotal", 32.0))),
             listOf(Metric("DISK", "diskLoad", "%", 100.0), Metric("READ", "diskRead", "MB/s", 100_000_000.0), Metric("WRITE", "diskWrite", "MB/s", 100_000_000.0))
         )
+        val groups = if (compact) listOf(allGroups[0].take(2), allGroups[1].take(2), allGroups[2].take(1)) else allGroups
         if (LocalConfiguration.current.screenWidthDp > LocalConfiguration.current.screenHeightDp) {
             Row(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 groups.forEach { group ->
@@ -334,7 +348,7 @@ class MainActivity : ComponentActivity() {
         val artwork: @Composable () -> Unit = {
             Box(Modifier.fillMaxWidth().aspectRatio(1f).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(20.dp)), contentAlignment = Alignment.Center) {
                 if (image != null) Image(image, "Обложка", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                else Text("♫", style = MaterialTheme.typography.displayLarge, color = Color.Gray)
+                else Text(iconGlyph("music-note"), fontFamily = FontFamily(Font(R.font.bootstrap_icons)), fontSize = 64.sp, color = Color.Gray)
             }
         }
         val controls: @Composable () -> Unit = {
@@ -342,12 +356,12 @@ class MainActivity : ComponentActivity() {
                 Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text(artist, color = Color.Gray)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { mediaAction("previous") }) { Text("⏮") }
-                    Button(onClick = { mediaAction("toggle") }) { Text(if (media.optBoolean("playing")) "⏸" else "▶") }
-                    Button(onClick = { mediaAction("next") }) { Text("⏭") }
+                    Button(onClick = { mediaAction("previous") }) { Text(iconGlyph("skip-backward-fill"), fontFamily = FontFamily(Font(R.font.bootstrap_icons)), fontSize = 24.sp) }
+                    Button(onClick = { mediaAction("toggle") }) { Text(iconGlyph(if (media.optBoolean("playing")) "pause-fill" else "play-fill"), fontFamily = FontFamily(Font(R.font.bootstrap_icons)), fontSize = 24.sp) }
+                    Button(onClick = { mediaAction("next") }) { Text(iconGlyph("skip-forward-fill"), fontFamily = FontFamily(Font(R.font.bootstrap_icons)), fontSize = 24.sp) }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Button(onClick = { mediaAction("mute") }) { Text(if (media.optBoolean("muted")) "🔇" else "🔊") }
+                    Button(onClick = { mediaAction("mute") }) { Text(iconGlyph(if (media.optBoolean("muted")) "volume-mute-fill" else "volume-up-fill"), fontFamily = FontFamily(Font(R.font.bootstrap_icons)), fontSize = 24.sp) }
                     Slider(value = volume.coerceIn(0f, 1f), onValueChange = { volume = it }, onValueChangeFinished = { mediaAction("volume", volume) }, modifier = Modifier.weight(1f))
                 }
             }
@@ -371,6 +385,11 @@ class MainActivity : ComponentActivity() {
                 refresh()
             } catch (exception: Exception) { status = exception.message ?: "Ошибка" }
         }
+    }
+
+    private fun iconGlyph(name: String): String {
+        val code = iconCodes.optInt(name, 0)
+        return if (code > 0) String(Character.toChars(code)) else "?"
     }
 
     @Composable

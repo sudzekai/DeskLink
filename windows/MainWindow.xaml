@@ -5,7 +5,33 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:DeskLink.Windows"
         mc:Ignorable="d"
-        Title="DeskLink" Height="550" Width="800">
+        Title="DeskLink" Height="550" Width="800" Background="#101319" Foreground="#F3F5F9">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="#344764"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="Margin" Value="3"/>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="#252C38"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="#526176"/>
+            <Setter Property="Padding" Value="6"/>
+            <Setter Property="Margin" Value="3"/>
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="#252C38"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Margin" Value="3"/>
+        </Style>
+        <Style TargetType="ListBox">
+            <Setter Property="Background" Value="#1C222D"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="#526176"/>
+        </Style>
+    </Window.Resources>
     <Grid>
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
         <TextBlock x:Name="StatusText" Text="Запуск DeskLink..." Margin="12" FontSize="17"/>
