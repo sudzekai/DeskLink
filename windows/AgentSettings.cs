@@ -8,6 +8,7 @@ namespace DeskLink.Windows
         public List<TrustedDevice> TrustedDevices { get; set; } = [];
         public string ReceiveFolder { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "DeskLink");
         public List<UserCommand> Commands { get; set; } = [];
+        public bool AutoUsbAdb { get; set; } = true;
 
         private static string FilePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DeskLink", "settings.json");
 

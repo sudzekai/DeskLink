@@ -13,6 +13,7 @@ namespace DeskLink.Windows
         private readonly AgentSettings _settings;
         private readonly HardwareService _hardware;
         private readonly AgentServer _server;
+        private readonly AdbUsbService _usb;
         private readonly ObservableCollection<UserCommand> _commands;
         private readonly ObservableCollection<TrustedDevice> _trusted;
         private readonly System.Windows.Forms.NotifyIcon _tray;
@@ -44,6 +45,9 @@ namespace DeskLink.Windows
                     LogList.Items.Add(line);
             }
             AutoStartBox.IsChecked = IsAutoStartEnabled();
+            AutoUsbBox.IsChecked = _settings.AutoUsbAdb;
+            _usb = new AdbUsbService(() => _settings.AutoUsbAdb, message => Dispatcher.InvokeAsync(() => UsbStatusText.Text = message));
+            _usb.Start();
             _tray = new System.Windows.Forms.NotifyIcon { Icon = System.Drawing.SystemIcons.Application, Text = "DeskLink", Visible = true, ContextMenuStrip = new() };
             _tray.ContextMenuStrip.Items.Add("Открыть", null, (_, _) => Dispatcher.Invoke(ShowWindow));
             _tray.ContextMenuStrip.Items.Add("Выход", null, (_, _) => Dispatcher.Invoke(Exit));
@@ -228,6 +232,12 @@ namespace DeskLink.Windows
             else key?.DeleteValue("DeskLink", false);
         }
 
+        private void AutoUsbChanged(object sender, RoutedEventArgs e)
+        {
+            _settings.AutoUsbAdb = AutoUsbBox.IsChecked == true;
+            _settings.Save();
+        }
+
         private void ShowWindow() { Show(); WindowState = WindowState.Normal; Activate(); }
         private void Exit() { _exit = true; Close(); }
 
@@ -237,6 +247,7 @@ namespace DeskLink.Windows
             _tray.Visible = false;
             _devicesTimer.Stop();
             _tray.Dispose();
+            _usb.Dispose();
             _server.DisposeAsync().AsTask().GetAwaiter().GetResult();
             _hardware.Dispose();
             base.OnClosing(e);

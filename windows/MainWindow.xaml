@@ -52,7 +52,9 @@
                         <TextBox x:Name="DeviceIdBox" IsReadOnly="True"/>
                         <TextBlock Text="Ключ подключения"/>
                         <TextBox x:Name="KeyBox" IsReadOnly="True"/>
-                        <TextBlock Text="TCP 47652; USB: adb reverse tcp:47652 tcp:47652"/>
+                        <TextBlock Text="TCP 47652"/>
+                        <CheckBox x:Name="AutoUsbBox" Content="Настраивать USB-подключение автоматически" Click="AutoUsbChanged"/>
+                        <TextBlock x:Name="UsbStatusText" Text="Проверка USB..." TextWrapping="Wrap" Margin="3,0,3,8"/>
                         <TextBlock Text="Папка файлов"/>
                         <TextBox x:Name="FolderBox"/>
                         <WrapPanel>
