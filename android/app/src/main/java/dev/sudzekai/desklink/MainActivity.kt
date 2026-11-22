@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.offset
 import kotlinx.coroutines.delay
@@ -74,6 +75,7 @@ class MainActivity : ComponentActivity() {
     private var pixelShift by mutableStateOf(true)
     private var keepScreen by mutableStateOf(true)
     private var shift by mutableIntStateOf(0)
+    private var wakingGesture = false
     private lateinit var iconCodes: JSONObject
     private var cpuWarning by mutableIntStateOf(70)
     private var cpuCritical by mutableIntStateOf(85)
@@ -125,7 +127,12 @@ class MainActivity : ComponentActivity() {
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             lastTouch = System.currentTimeMillis()
+            wakingGesture = ambient
             if (ambient) ambient = false
+        }
+        if (wakingGesture) {
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) wakingGesture = false
+            return true
         }
         return super.dispatchTouchEvent(event)
     }
@@ -146,7 +153,7 @@ class MainActivity : ComponentActivity() {
             metrics = response.getJSONObject("data")
             status = "Подключено"
             lastConnectedAt = System.currentTimeMillis()
-            if (!ambient) {
+            run {
                 val mediaResponse = client().request("media")
                 if (mediaResponse.optBoolean("ok")) media = mediaResponse.getJSONObject("data")
                 val commandResponse = client().request("commands")
@@ -172,14 +179,14 @@ class MainActivity : ComponentActivity() {
         val isLandscape = LocalConfiguration.current.screenWidthDp > LocalConfiguration.current.screenHeightDp
         LaunchedEffect(Unit) {
             while (true) {
-                ambient = ambientEnabled && System.currentTimeMillis() - lastTouch >= idleMinutes * 60_000L
+                ambient = pager.currentPage != 3 && ambientEnabled && System.currentTimeMillis() - lastTouch >= idleMinutes * 60_000L
                 refresh()
                 delay(if (ambient) telemetrySeconds * 1000L else 3_000)
             }
         }
         LaunchedEffect(ambient, pixelShift) {
             while (ambient && pixelShift) {
-                shift = (shift + 1) % 5
+                shift = (shift + 1) % 9
                 delay(60_000)
             }
         }
@@ -197,21 +204,18 @@ class MainActivity : ComponentActivity() {
         }
         MaterialTheme(colorScheme = darkColorScheme(background = Color(0xFF0F1116), surface = Color(0xFF202630), primary = Color(0xFF82B8FF))) {
             CompositionLocalProvider(LocalContentColor provides Color.White) {
-            if (ambient) {
-                Box(Modifier.fillMaxSize().background(Color.Black).safeDrawingPadding().clickable { ambient = false }, contentAlignment = Alignment.Center) {
-                    Box(Modifier.offset(x = (shift * 2).dp, y = (shift * 2).dp)) { Monitoring(metrics, true) }
-                }
-            } else {
-                Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).safeDrawingPadding()) {
+                val displacement = if (ambient && pixelShift) (shift % 3 - 1) * 2 else 0
+                val verticalDisplacement = if (ambient && pixelShift) (shift / 3 - 1) * 2 else 0
+                Column(Modifier.fillMaxSize().background(if (ambient) Color.Black else MaterialTheme.colorScheme.background).safeDrawingPadding().offset(displacement.dp, verticalDisplacement.dp)) {
                     AnimatedContent(targetState = pager.currentPage, transitionSpec = {
                         val direction = if (targetState > initialState) 1 else -1
                         slideInHorizontally(tween(220)) { it * direction } togetherWith slideOutHorizontally(tween(220)) { -it * direction }
                     }, label = "sectionTitle") { page ->
                         Text(pages[page], Modifier.padding(start = 16.dp, top = 6.dp), color = Color.LightGray, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium)
                     }
-                    HorizontalPager(state = pager, modifier = Modifier.weight(1f), verticalAlignment = Alignment.Top) { page ->
+                    HorizontalPager(state = pager, modifier = Modifier.weight(1f), userScrollEnabled = !ambient, verticalAlignment = Alignment.Top) { page ->
                         when (page) {
-                            0 -> Monitoring(metrics, false)
+                            0 -> Monitoring(metrics, ambient)
                             1 -> MediaPage(isLandscape)
                             2 -> CommandsPage(commands)
                             else -> SettingsPage()
@@ -224,7 +228,6 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-            }
             }
         }
     }
@@ -295,9 +298,9 @@ class MainActivity : ComponentActivity() {
         BoxWithConstraints(Modifier.fillMaxSize()) {
         val columnCount = (items.size + 1) / 2
         val overflows = 24.dp + 140.dp * columnCount + 10.dp * (columnCount - 1).coerceAtLeast(0) > maxWidth
-        LazyHorizontalGrid(rows = GridCells.Fixed(2), userScrollEnabled = overflows, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LazyHorizontalGrid(rows = GridCells.Fixed(2), userScrollEnabled = overflows && !ambient, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(items) { command ->
-                Box(Modifier.width(140.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(20.dp)).clickable {
+                Box(Modifier.width(140.dp).fillMaxHeight().background(if (ambient) Color.Black else MaterialTheme.colorScheme.surface, RoundedCornerShape(20.dp)).clickable {
                     scope.launch {
                         status = "Выполняется: ${command.name}"
                         try {
@@ -345,18 +348,18 @@ class MainActivity : ComponentActivity() {
                 if (duration > start) {
                     Slider(value = position.coerceIn(start, duration), onValueChange = { seeking = true; position = it },
                         onValueChangeFinished = { mediaAction("seek", position); seeking = false },
-                        valueRange = start..duration, enabled = media.optBoolean("canSeek"), modifier = Modifier.fillMaxWidth().height(32.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        valueRange = start..duration, enabled = media.optBoolean("canSeek"), modifier = Modifier.fillMaxWidth().height(32.dp).alpha(if (ambient) 0f else 1f))
+                    Row(Modifier.fillMaxWidth().alpha(if (ambient) 0f else 1f), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(formatTime(position - start), fontSize = 11.sp, color = Color.Gray)
                         Text(formatTime(duration - start), fontSize = 11.sp, color = Color.Gray)
                     }
                 }
-                Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.alpha(if (ambient) 0f else 1f).padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Button(onClick = { mediaAction("previous") }) { Text(iconGlyph("skip-backward-fill"), fontFamily = FontFamily(Font(R.font.bootstrap_icons)), fontSize = 24.sp) }
                     Button(onClick = { mediaAction("toggle") }) { Text(iconGlyph(if (media.optBoolean("playing")) "pause-fill" else "play-fill"), fontFamily = FontFamily(Font(R.font.bootstrap_icons)), fontSize = 24.sp) }
                     Button(onClick = { mediaAction("next") }) { Text(iconGlyph("skip-forward-fill"), fontFamily = FontFamily(Font(R.font.bootstrap_icons)), fontSize = 24.sp) }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.alpha(if (ambient) 0f else 1f), verticalAlignment = Alignment.CenterVertically) {
                     Button(onClick = { mediaAction("mute") }) { Text(iconGlyph(if (media.optBoolean("muted")) "volume-mute-fill" else "volume-up-fill"), fontFamily = FontFamily(Font(R.font.bootstrap_icons)), fontSize = 24.sp) }
                     Slider(value = volume.coerceIn(0f, 1f), onValueChange = { volume = it }, onValueChangeFinished = { mediaAction("volume", volume) }, modifier = Modifier.weight(1f))
                 }
