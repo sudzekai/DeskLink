@@ -18,6 +18,7 @@ namespace DeskLink.Windows
 
             var properties = await session.TryGetMediaPropertiesAsync();
             var playback = session.GetPlaybackInfo();
+            var timeline = session.GetTimelineProperties();
             var artwork = "";
 
             if (properties.Thumbnail is not null)
@@ -37,6 +38,10 @@ namespace DeskLink.Windows
             {
                 title = properties.Title,
                 artist = properties.Artist,
+                position = timeline.Position.TotalSeconds,
+                start = timeline.StartTime.TotalSeconds,
+                duration = timeline.EndTime.TotalSeconds,
+                canSeek = playback.Controls.IsPlaybackPositionEnabled && timeline.EndTime > timeline.StartTime,
                 playing = playback.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing,
                 artwork,
                 volume = volume.MasterVolumeLevelScalar,
@@ -59,6 +64,15 @@ namespace DeskLink.Windows
 
             switch (operation)
             {
+                case "seek":
+                    var timeline = session.GetTimelineProperties();
+                    if (!session.GetPlaybackInfo().Controls.IsPlaybackPositionEnabled || level is null || !float.IsFinite(level.Value))
+                        throw new InvalidOperationException("Плеер не поддерживает перемотку");
+
+                    var seconds = Math.Clamp((double)level.Value, timeline.StartTime.TotalSeconds, timeline.EndTime.TotalSeconds);
+                    if (!await session.TryChangePlaybackPositionAsync(TimeSpan.FromSeconds(seconds).Ticks))
+                        throw new InvalidOperationException("Плеер отклонил перемотку");
+                    break;
                 case "toggle": await session.TryTogglePlayPauseAsync(); break;
                 case "next": await session.TrySkipNextAsync(); break;
                 case "previous": await session.TrySkipPreviousAsync(); break;

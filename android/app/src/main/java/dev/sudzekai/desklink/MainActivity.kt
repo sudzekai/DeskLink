@@ -1,7 +1,5 @@
 package dev.sudzekai.desklink
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.Manifest
 import android.bluetooth.BluetoothManager
@@ -28,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.rememberPagerState
@@ -52,7 +51,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.util.Base64
-import java.io.File
 
 class MainActivity : ComponentActivity() {
     private val preferences by lazy { getSharedPreferences("desklink", MODE_PRIVATE) }
@@ -67,7 +65,6 @@ class MainActivity : ComponentActivity() {
     private var deviceId by mutableStateOf("primary")
     private var bluetoothAddress by mutableStateOf("")
     private var pairedDevices by mutableStateOf(listOf<Pair<String, String>>())
-    private var clipboardText by mutableStateOf("")
     private var ambientEnabled by mutableStateOf(true)
     private var ambient by mutableStateOf(false)
     private var idleMinutes by mutableIntStateOf(5)
@@ -82,59 +79,15 @@ class MainActivity : ComponentActivity() {
     private var cpuCritical by mutableIntStateOf(85)
     private var gpuWarning by mutableIntStateOf(75)
     private var gpuCritical by mutableIntStateOf(90)
-    private var fileStatus by mutableStateOf("")
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main)
     private val bluetoothPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) refreshPairedDevices()
     }
 
-    private val pickFiles = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        scope.launch {
-            uris.forEachIndexed { index, uri ->
-                try {
-                    val name = contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                        val column = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                        if (cursor.moveToFirst() && column >= 0) cursor.getString(column) else null
-                    } ?: "file"
-                    val temporary = File.createTempFile("desklink-", ".upload", cacheDir)
-                    var uploadId = ""
-                    try {
-                        contentResolver.openInputStream(uri)?.use { source -> temporary.outputStream().use { source.copyTo(it) } }
-                            ?: error("Не удалось открыть файл")
-                        val connection = client()
-                        val started = connection.request("file.start", JSONObject().put("name", name).put("size", temporary.length()))
-                        if (!started.optBoolean("ok")) error(started.optString("error"))
-                        uploadId = started.getString("data")
-                        val buffer = ByteArray(512 * 1024)
-                        var sent = 0L
-                        temporary.inputStream().use { source ->
-                            while (true) {
-                                val length = source.read(buffer)
-                                if (length < 0) break
-                                val chunk = Base64.getEncoder().encodeToString(buffer.copyOf(length))
-                                val result = connection.request("file.chunk", JSONObject().put("id", uploadId).put("data", chunk))
-                                if (!result.optBoolean("ok")) error(result.optString("error"))
-                                sent += length
-                                fileStatus = "${index + 1}/${uris.size}: ${(sent * 100 / temporary.length().coerceAtLeast(1))}%"
-                            }
-                        }
-                        val finished = connection.request("file.finish", JSONObject().put("id", uploadId))
-                        if (!finished.optBoolean("ok")) error(finished.optString("error"))
-                        fileStatus = "Передано ${index + 1} из ${uris.size}"
-                    } catch (exception: Exception) {
-                        if (uploadId.isNotBlank()) try { client().request("file.cancel", JSONObject().put("id", uploadId)) } catch (_: Exception) { }
-                        throw exception
-                    } finally { temporary.delete() }
-                } catch (exception: Exception) {
-                    fileStatus = "Ошибка файла: ${exception.message}"
-                }
-            }
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setTurnScreenOn(true)
+        hideSystemBars()
         host = preferences.getString("host", "127.0.0.1") ?: "127.0.0.1"
         key = preferences.getString("key", "") ?: ""
         deviceId = preferences.getString("deviceId", "primary") ?: "primary"
@@ -146,7 +99,6 @@ class MainActivity : ComponentActivity() {
         preferredHz = preferences.getFloat("preferredHz", 10f)
         pixelShift = preferences.getBoolean("pixelShift", true)
         keepScreen = preferences.getBoolean("keepScreen", true)
-        clipboardText = (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).primaryClip?.getItemAt(0)?.coerceToText(this)?.toString() ?: ""
         iconCodes = JSONObject(assets.open("bootstrap-icons.json").bufferedReader().use { it.readText() })
         cpuWarning = preferences.getInt("cpuWarning", 70)
         cpuCritical = preferences.getInt("cpuCritical", 85)
@@ -155,6 +107,19 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED)
             refreshPairedDevices()
         setContent { DeskLinkScreen() }
+    }
+
+    private fun hideSystemBars() {
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+        androidx.core.view.WindowInsetsControllerCompat(window, window.decorView).apply {
+            systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideSystemBars()
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
@@ -201,7 +166,7 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalFoundationApi::class)
     @Composable
     private fun DeskLinkScreen() {
-        val pages = listOf("Мониторинг", "Мультимедиа", "Команды", "Файлы и буфер", "Настройки")
+        val pages = listOf("Мониторинг", "Мультимедиа", "Команды", "Настройки")
         val pager = rememberPagerState(pageCount = { pages.size })
         val coroutineScope = rememberCoroutineScope()
         val isLandscape = LocalConfiguration.current.screenWidthDp > LocalConfiguration.current.screenHeightDp
@@ -244,12 +209,11 @@ class MainActivity : ComponentActivity() {
                     }, label = "sectionTitle") { page ->
                         Text(pages[page], Modifier.padding(start = 16.dp, top = 6.dp), color = Color.LightGray, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium)
                     }
-                    HorizontalPager(state = pager, modifier = Modifier.weight(1f)) { page ->
+                    HorizontalPager(state = pager, modifier = Modifier.weight(1f), verticalAlignment = Alignment.Top) { page ->
                         when (page) {
                             0 -> Monitoring(metrics, false)
                             1 -> MediaPage(isLandscape)
                             2 -> CommandsPage(commands)
-                            3 -> FilesPage(isLandscape)
                             else -> SettingsPage()
                         }
                     }
@@ -273,17 +237,25 @@ class MainActivity : ComponentActivity() {
             listOf(Metric("RAM", "ramLoad", "%", 100.0), Metric("RAM", "ramUsed", "GB", data.optDouble("ramTotal", 32.0))),
             listOf(Metric("DISK", "diskLoad", "%", 100.0), Metric("READ", "diskRead", "MB/s", 100_000_000.0), Metric("WRITE", "diskWrite", "MB/s", 100_000_000.0))
         )
-        val groups = if (compact) listOf(allGroups[0].take(2), allGroups[1].take(2), allGroups[2].take(1)) else allGroups
-        if (LocalConfiguration.current.screenWidthDp > LocalConfiguration.current.screenHeightDp) {
-            Row(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                groups.forEach { group ->
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        group.forEach { metric -> MetricCard(data, metric, compact) }
+        val available = allGroups.flatten().filter { !data.isNull(it.key) && data.optDouble(it.key).isFinite() }
+        if (available.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Ожидание показателей ПК", color = Color.Gray) }
+            return
+        }
+        BoxWithConstraints(Modifier.fillMaxSize().padding(12.dp)) {
+            val columns = if (maxWidth > maxHeight) 4 else 2
+            val rows = (available.size + columns - 1) / columns
+            val cardHeight = ((maxHeight - 8.dp * (rows - 1)) / rows).coerceAtMost(110.dp).coerceAtLeast(48.dp)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                available.chunked(columns).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { metric ->
+                            Box(Modifier.weight(1f).height(cardHeight)) { MetricCard(data, metric, compact) }
+                        }
+                        repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
             }
-        } else LazyVerticalGrid(columns = GridCells.Adaptive(if (compact) 150.dp else 125.dp), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(groups.flatten()) { metric -> MetricCard(data, metric, compact) }
         }
     }
 
@@ -302,20 +274,18 @@ class MainActivity : ComponentActivity() {
             metric.unit == "GB" -> "%.1f GB".format(value)
             else -> "${value.toInt()}${metric.unit}"
         }
-        Box(Modifier.fillMaxWidth().aspectRatio(1f).background(if (compact) Color.Black else MaterialTheme.colorScheme.surface, RoundedCornerShape(20.dp)), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxSize().padding(12.dp), color = color, trackColor = Color.DarkGray)
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(metric.title, color = Color.Gray, fontWeight = FontWeight.SemiBold)
-                Text(shown, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, color = Color.White)
-            }
+        Column(Modifier.fillMaxSize().background(if (compact) Color.Black else MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp)).padding(horizontal = 14.dp, vertical = 8.dp), verticalArrangement = Arrangement.SpaceBetween) {
+            Text(metric.title + if (temperature) " · Температура" else "", color = Color(0xFF9AA8BA), fontSize = 11.sp, maxLines = 1)
+            Text(shown, fontWeight = FontWeight.SemiBold, fontSize = 20.sp, color = color, maxLines = 1)
+            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(3.dp), color = color, trackColor = Color(0xFF303B4A))
         }
     }
 
     @Composable
     private fun CommandsPage(items: List<RemoteCommand>) {
-        LazyVerticalGrid(columns = GridCells.Adaptive(110.dp), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LazyHorizontalGrid(rows = GridCells.Fixed(2), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(items) { command ->
-                Box(Modifier.aspectRatio(1f).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(20.dp)).clickable {
+                Box(Modifier.width(140.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(20.dp)).clickable {
                     scope.launch {
                         status = "Выполняется: ${command.name}"
                         try {
@@ -345,17 +315,31 @@ class MainActivity : ComponentActivity() {
             } catch (_: Exception) { null }
         }
         var volume by remember(media.optDouble("volume")) { mutableFloatStateOf(media.optDouble("volume", 0.5).toFloat()) }
+        val duration = media.optDouble("duration", 0.0).toFloat()
+        val start = media.optDouble("start", 0.0).toFloat()
+        var seeking by remember { mutableStateOf(false) }
+        var position by remember { mutableFloatStateOf(0f) }
+        LaunchedEffect(media) { if (!seeking) position = media.optDouble("position", 0.0).toFloat() }
         val artwork: @Composable () -> Unit = {
-            Box(Modifier.fillMaxWidth().aspectRatio(1f).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(20.dp)), contentAlignment = Alignment.Center) {
-                if (image != null) Image(image, "Обложка", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface), contentAlignment = Alignment.Center) {
+                if (image != null) Image(image, "Обложка", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                 else Text(iconGlyph("music-note"), fontFamily = FontFamily(Font(R.font.bootstrap_icons)), fontSize = 64.sp, color = Color.Gray)
             }
         }
         val controls: @Composable () -> Unit = {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text(artist, color = Color.Gray)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                Text(artist, color = Color.Gray, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                if (duration > start) {
+                    Slider(value = position.coerceIn(start, duration), onValueChange = { seeking = true; position = it },
+                        onValueChangeFinished = { mediaAction("seek", position); seeking = false },
+                        valueRange = start..duration, enabled = media.optBoolean("canSeek"), modifier = Modifier.fillMaxWidth().height(32.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(formatTime(position - start), fontSize = 11.sp, color = Color.Gray)
+                        Text(formatTime(duration - start), fontSize = 11.sp, color = Color.Gray)
+                    }
+                }
+                Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Button(onClick = { mediaAction("previous") }) { Text(iconGlyph("skip-backward-fill"), fontFamily = FontFamily(Font(R.font.bootstrap_icons)), fontSize = 24.sp) }
                     Button(onClick = { mediaAction("toggle") }) { Text(iconGlyph(if (media.optBoolean("playing")) "pause-fill" else "play-fill"), fontFamily = FontFamily(Font(R.font.bootstrap_icons)), fontSize = 24.sp) }
                     Button(onClick = { mediaAction("next") }) { Text(iconGlyph("skip-forward-fill"), fontFamily = FontFamily(Font(R.font.bootstrap_icons)), fontSize = 24.sp) }
@@ -367,11 +351,11 @@ class MainActivity : ComponentActivity() {
             }
         }
         if (isLandscape) Row(Modifier.fillMaxSize().padding(12.dp)) {
-            Box(Modifier.weight(1f)) { artwork() }
-            Box(Modifier.weight(1f)) { controls() }
+            Box(Modifier.weight(0.42f).fillMaxHeight()) { artwork() }
+            Box(Modifier.weight(0.58f).fillMaxHeight()) { controls() }
         } else Column(Modifier.fillMaxSize().padding(12.dp)) {
-            artwork()
-            controls()
+            Box(Modifier.weight(1f).fillMaxWidth()) { artwork() }
+            Box(Modifier.height(280.dp)) { controls() }
         }
     }
 
@@ -387,35 +371,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun formatTime(seconds: Float): String {
+        val total = seconds.toInt().coerceAtLeast(0)
+        return "%d:%02d".format(total / 60, total % 60)
+    }
+
     private fun iconGlyph(name: String): String {
         val code = iconCodes.optInt(name, 0)
         return if (code > 0) String(Character.toChars(code)) else "?"
-    }
-
-    @Composable
-    private fun FilesPage(isLandscape: Boolean) {
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clipboardBlock: @Composable () -> Unit = {
-            Column(Modifier.padding(12.dp)) {
-                Text("Буфер обмена")
-                OutlinedTextField(value = clipboardText, onValueChange = { clipboardText = it }, modifier = Modifier.fillMaxWidth().height(130.dp))
-                Row {
-                    Button(onClick = { clipboardText = clipboard.primaryClip?.getItemAt(0)?.coerceToText(this@MainActivity)?.toString() ?: "" }) { Text("Из телефона") }
-                    Button(onClick = { scope.launch { try { client().request("clipboard.set", JSONObject().put("text", clipboardText)); status = "Передано" } catch (e: Exception) { status = e.message ?: "Ошибка" } } }) { Text("Передать") }
-                    Button(onClick = { scope.launch { try { clipboardText = client().request("clipboard.get").optString("data"); clipboard.setPrimaryClip(ClipData.newPlainText("DeskLink", clipboardText)) } catch (e: Exception) { status = e.message ?: "Ошибка" } } }) { Text("Получить") }
-                }
-            }
-        }
-        val filesBlock: @Composable () -> Unit = {
-            Column(Modifier.padding(12.dp)) {
-                Text("Файлы")
-                Button(onClick = { pickFiles.launch(arrayOf("image/*", "video/*")) }) { Text("Фото/видео") }
-                Button(onClick = { pickFiles.launch(arrayOf("*/*")) }) { Text("Файлы") }
-                Text(fileStatus)
-            }
-        }
-        if (isLandscape) Row { Box(Modifier.weight(1f)) { clipboardBlock() }; Box(Modifier.weight(1f)) { filesBlock() } }
-        else Column { clipboardBlock(); filesBlock() }
     }
 
     @Composable
