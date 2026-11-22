@@ -274,16 +274,28 @@ class MainActivity : ComponentActivity() {
             metric.unit == "GB" -> "%.1f GB".format(value)
             else -> "${value.toInt()}${metric.unit}"
         }
-        Column(Modifier.fillMaxSize().background(if (compact) Color.Black else MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp)).padding(horizontal = 14.dp, vertical = 8.dp), verticalArrangement = Arrangement.SpaceBetween) {
-            Text(metric.title + if (temperature) " · Температура" else "", color = Color(0xFF9AA8BA), fontSize = 11.sp, maxLines = 1)
-            Text(shown, fontWeight = FontWeight.SemiBold, fontSize = 20.sp, color = color, maxLines = 1)
-            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(3.dp), color = color, trackColor = Color(0xFF303B4A))
+        Box(Modifier.fillMaxSize().background(if (compact) Color.Black else MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
+            androidx.compose.foundation.Canvas(Modifier.fillMaxSize().padding(6.dp)) {
+                val diameter = size.minDimension - 4.dp.toPx()
+                val origin = androidx.compose.ui.geometry.Offset((size.width - diameter) / 2, (size.height - diameter) / 2)
+                val ringSize = androidx.compose.ui.geometry.Size(diameter, diameter)
+                val stroke = androidx.compose.ui.graphics.drawscope.Stroke(3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                drawArc(Color(0xFF303B4A), -90f, 360f, false, origin, ringSize, style = stroke)
+                drawArc(color, -90f, if (temperature) 360f else progress * 360f, false, origin, ringSize, style = stroke)
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(metric.title, color = Color(0xFF9AA8BA), fontSize = 11.sp, maxLines = 1)
+                Text(shown, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = Color.White, maxLines = 1)
+            }
         }
     }
 
     @Composable
     private fun CommandsPage(items: List<RemoteCommand>) {
-        LazyHorizontalGrid(rows = GridCells.Fixed(2), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+        val columnCount = (items.size + 1) / 2
+        val overflows = 24.dp + 140.dp * columnCount + 10.dp * (columnCount - 1).coerceAtLeast(0) > maxWidth
+        LazyHorizontalGrid(rows = GridCells.Fixed(2), userScrollEnabled = overflows, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(items) { command ->
                 Box(Modifier.width(140.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(20.dp)).clickable {
                     scope.launch {
@@ -297,10 +309,10 @@ class MainActivity : ComponentActivity() {
                     val code = iconCodes.optInt(command.icon, 0)
                     if (code > 0) Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(String(Character.toChars(code)), fontFamily = FontFamily(Font(R.font.bootstrap_icons)), fontSize = 36.sp, color = Color.White)
-                        Text(command.name, textAlign = TextAlign.Center, style = MaterialTheme.typography.labelMedium, color = Color.LightGray)
                     } else Text(command.name, textAlign = TextAlign.Center, modifier = Modifier.padding(8.dp), color = Color.White)
                 }
             }
+        }
         }
     }
 
